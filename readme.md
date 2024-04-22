@@ -35,11 +35,8 @@ Follow these steps to authenticate to Azure, initialize thetemplate, provision i
 1. Run the first-time project setup. Initialize a project in the current directory, using this template.
 
     ```shell
-    azd init --template dab-azure-sql-quickstart
+    azd init 
     ```
-
-    > [!NOTE]
-    > Omit the --template argument if you are running in a development container.
 
 1. Provision the resources in Azure and deploy the application code.
 
