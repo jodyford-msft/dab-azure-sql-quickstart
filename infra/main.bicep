@@ -17,6 +17,7 @@ param functionStorName string = ''
 param functionAppName string = ''
 param staticWebAppName string = ''
 
+
 // *ServiceName is used as value for the tag (azd-service-name) azd uses to identify deployment host
 param webServiceName string = 'web'
 param apiServiceName string = 'api'
@@ -25,26 +26,17 @@ var abbreviations = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
   'azd-env-name': environmentName
-  repo: 'https://github.com/azure-samples/dab-azure-sql-quickstart'
+  repo: 'https://github.com/jodyford-msft/dab-azure-sql-quickstart'
 }
 
-// Define resource group
-resource resourceGroup 'Microsoft.Resources/resourceGroups@2022-09-01' = {
-  name: environmentName
-  location: location
-  tags: tags
+
+resource resourceGroup 'Microsoft.Resources/resourceGroups@2022-09-01' existing = {
+  name:environmentName
 }
 
-module identity 'app/identity.bicep' = {
-  name: 'identity'
+resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' existing = {
+  name: userAssignedIdentityName
   scope: resourceGroup
-  params: {
-    identityName: !empty(userAssignedIdentityName)
-      ? userAssignedIdentityName
-      : '${abbreviations.userAssignedIdentity}-${resourceToken}'
-    location: location
-    tags: tags
-  }
 }
 
 module storage 'app/storage.bicep' = {
@@ -54,7 +46,7 @@ module storage 'app/storage.bicep' = {
     storName: !empty(functionStorName) ? functionStorName : '${abbreviations.storageAccounts}${resourceToken}'
     location: location
     tags: tags
-    managedIdentityClientId: identity.outputs.clientId
+    managedIdentityClientId: identity.properties.clientId
   }
 }
 
@@ -67,9 +59,9 @@ module web 'app/web.bicep' = {
     tags: tags
     serviceTag: webServiceName
     userAssignedManagedIdentity: {
-      name: identity.outputs.name
-      resourceId: identity.outputs.resourceId
-      clientId: identity.outputs.clientId
+      name: identity.name
+      resourceId: identity.properties.principalId
+      clientId: identity.properties.clientId
     }
     functionAppName: api.outputs.name
   }
@@ -86,29 +78,37 @@ module api 'app/api.bicep' = {
     serviceTag: apiServiceName
     storageAccountName: storage.outputs.name
     userAssignedManagedIdentity: {
-      resourceId: identity.outputs.resourceId
-      clientId: identity.outputs.clientId
+      resourceId: identity.properties.principalId
+      clientId: identity.properties.clientId
     }
   }
 }
 
-module database 'app/database.bicep' = {
-  name: 'database'
+
+resource existingSqlServer 'Microsoft.Sql/servers@2021-02-01-preview' existing = {
+  name: sqlServerName
+  scope: resourceGroup
+}
+
+// Reference the user-assigned managed identity
+
+var existingSqlServerId = existingSqlServer.id
+var identityId = identity.id
+
+// Reference the module
+module sqlServerIdentityModule 'app/mi.bicep' = {
+  name: 'sqlServerIdentityModule'
   scope: resourceGroup
   params: {
-    serverName: !empty(sqlServerName) ? sqlServerName : '${abbreviations.sqlServers}-${resourceToken}'
-    databaseName: 'adventureworkslt'
-    location: location
-    tags: tags
-    databaseAdministrator: {
-      name: identity.outputs.name
-      clientId: identity.outputs.clientId
-      tenantId: identity.outputs.tenantId
-    }
+    existingSqlServerId: existingSqlServerId
+    identityId: identityId
+    sqlServerName: sqlServerName
+    identityPrincipalId: identity.properties.principalId
   }
 }
 
 // Application outputs
 output AZURE_STATIC_WEB_APP_ENDPOINT string = web.outputs.endpoint
 output AZURE_FUNCTION_API_ENDPOINT string = api.outputs.endpoint
-output AZURE_SQL_SERVER_ENDPOINT string = database.outputs.serverEndpoint
+output AZURE_SQL_SERVER_ENDPOINT string = existingSqlServer.properties.fullyQualifiedDomainName
+
